@@ -1,96 +1,86 @@
-# S2K – Spanish to Katakana Converter
+# Spanish to Katakana (S2K)
 
-## Rebuild Instructions
+Convert Spanish text into Katakana through an intermediate phonetic English representation.
 
-This project includes a build script to generate the executable (`.exe`) using PyInstaller.
+This project provides a **windows application** built around a shared core conversion engine.
 
-### Requirements
+---
 
-Make sure you have PyInstaller installed:
+## ✨ Features
 
-```bash
-pip install pyinstaller
+- Spanish → English phonetic → Katakana conversion
+- Windows app (Windows executable)
+- Shared core logic
+- Automated build scripts
+- Validation tools for project integrity
+
+---
+
+## 🏗️ Project Structure
+
+```
+s2k/
+│
+├── core/
+├── frontend/
+│   └── windows/
+│
+├── scripts/
+│   ├── build.py
+│   ├── build_windows.py
+│   └── validate_project.py
+│
+├── assets/
+│   └── icons/
+│
+├── requirements-windows.txt
+└── README.md
 ```
 
 ---
 
-## How to Rebuild
+## ⚙️ Requirements
 
-1. Place yourself in the project folder (where `build.py` is located)
+### Windows (Windows)
+- Python 3.10+
+- pip
 
-2. Run:
+---
 
-```bash
-python build.py
+## 🚀 Quick Start
+
+### Install dependencies
+
+```
+pip install -r requirements-windows.txt
 ```
 
 ---
 
-## What the Script Does
-
-The script will automatically:
-
-- Clean previous build artifacts:
-  - `build/`
-  - `dist/`
-  - `s2k.spec`
-- Rebuild the executable using:
-  - `s2k.ico` as the application icon
-- Output the final executable to:
+## 🖥️ Run
 
 ```
-dist/s2k.exe
+python run_windows.py
 ```
 
 ---
 
-## Important Notes
-
-### Icon Changes
-
-If you update `s2k.ico`, Windows may still show the old icon due to caching.
-
-To fix this:
-
-1. Restart Windows Explorer:
-
-```bash
-taskkill /f /im explorer.exe
-start explorer.exe
-```
-
-OR
-
-2. Rename the `.exe` file temporarily
-
-OR
-
-3. Move the `.exe` to a different folder
-
----
-
-## Project Structure
+## 🏗️ Build
 
 ```
-build.py
-s2k.py
-s2k.ico
-README.md
+python scripts/build.py --windows
 ```
 
 ---
 
-## Output
-
-After a successful build:
+## 🧪 Validation
 
 ```
-dist/s2k.exe
+python scripts/build.py --validate
 ```
 
 ---
 
-## Troubleshooting
+## 📄 License
 
-- If the icon does not appear → restart Explorer (see above)
-- If build fails → ensure `pyinstaller` is installed and available in PATH
+Private / Internal

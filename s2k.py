@@ -366,7 +366,6 @@ class KatakanaClient:
             "accept-language": "en-US,en;q=0.9,es;q=0.8",
             "referer": "https://www.sljfaq.org/cgi/e2k.cgi",
             "sec-ch-ua": '"Chromium";v="146", "Not-A.Brand";v="24", "Google Chrome";v="146"',
-            "sec-ch-ua-mobile": "?0",
             "sec-ch-ua-platform": '"Windows"',
             "sec-fetch-dest": "empty",
             "sec-fetch-mode": "cors",
