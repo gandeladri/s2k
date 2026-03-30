@@ -1,86 +1,46 @@
-# Spanish to Katakana (S2K)
+# Spanish to Katana Converter (S2K)
 
-Convert Spanish text into Katakana through an intermediate phonetic English representation.
-
-This project provides a **windows application** built around a shared core conversion engine.
+A desktop application that converts Spanish text into phonetically accurate Katakana, with optional Google Translate integration.
 
 ---
 
-## ✨ Features
+## Download (Windows)
 
-- Spanish → English phonetic → Katakana conversion
-- Windows app (Windows executable)
-- Shared core logic
-- Automated build scripts
-- Validation tools for project integrity
+Download the latest version here:
 
----
+👉 https://github.com/gandeladri/s2k/releases/latest/download/s2k.exe
 
-## 🏗️ Project Structure
-
-```
-s2k/
-│
-├── core/
-├── frontend/
-│   └── windows/
-│
-├── scripts/
-│   ├── build.py
-│   ├── build_windows.py
-│   └── validate_project.py
-│
-├── assets/
-│   └── icons/
-│
-├── requirements-windows.txt
-└── README.md
-```
+> Note: If the icon does not appear correctly after updating, restart Windows Explorer.
 
 ---
 
-## ⚙️ Requirements
+## Run from Source
 
-### Windows (Windows)
-- Python 3.10+
-- pip
-
----
-
-## 🚀 Quick Start
-
-### Install dependencies
-
-```
-pip install -r requirements-windows.txt
-```
-
----
-
-## 🖥️ Run
-
-```
+```bash
 python run_windows.py
 ```
 
 ---
 
-## 🏗️ Build
+## Build (Windows)
 
-```
-python scripts/build.py --windows
-```
-
----
-
-## 🧪 Validation
-
-```
-python scripts/build.py --validate
+```bash
+python scripts/build_windows.py
 ```
 
 ---
 
-## 📄 License
+## Requirements
 
-Private / Internal
+```bash
+pip install -r requirements-windows.txt
+pip install pyinstaller
+```
+
+---
+
+## Notes
+
+- The application is designed specifically for Windows.
+- The executable is built using PyInstaller.
+- If rebuilding with a new icon, Windows may cache the old one — restart Explorer if needed.
