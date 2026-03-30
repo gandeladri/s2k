@@ -26,8 +26,6 @@ python run_windows.py
 python scripts/build_windows.py
 ```
 
-> Note: If the icon does not appear correctly after updating, restart Windows Explorer.
-
 ---
 
 ## Requirements
