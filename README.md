@@ -10,8 +10,6 @@ Download the latest version here:
 
 👉 https://github.com/gandeladri/s2k/releases/latest/download/s2k.exe
 
-> Note: If the icon does not appear correctly after updating, restart Windows Explorer.
-
 ---
 
 ## Run from Source
