@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import unicodedata
 from pathlib import Path
@@ -445,6 +446,7 @@ class SpanishToKatanaConverterApp:
 
         self.katakana_client = KatakanaClient()
         self.last_katakana_output = ""
+        self.auto_open_translate_var = tk.BooleanVar(value=True)
 
         self.configure_styles()
         self.build_ui()
@@ -497,6 +499,19 @@ class SpanishToKatanaConverterApp:
         )
 
         style.configure(
+            "TCheckbutton",
+            background=BG_COLOR,
+            foreground=MUTED_TEXT_COLOR,
+            font=self.button_font,
+        )
+
+        style.map(
+            "TCheckbutton",
+            background=[("active", BG_COLOR)],
+            foreground=[("disabled", "#888888")],
+        )
+
+        style.configure(
             "Vertical.TScrollbar",
             background=SCROLL_BG_COLOR,
             troughcolor=SCROLL_TROUGH_COLOR,
@@ -530,7 +545,8 @@ class SpanishToKatanaConverterApp:
         button_frame.columnconfigure(0, weight=0)
         button_frame.columnconfigure(1, weight=0)
         button_frame.columnconfigure(2, weight=0)
-        button_frame.columnconfigure(3, weight=1)
+        button_frame.columnconfigure(3, weight=0)
+        button_frame.columnconfigure(4, weight=1)
 
         self.convert_button = ttk.Button(button_frame, text="convert", command=self.on_convert)
         self.convert_button.grid(row=0, column=0, padx=(0, 10), sticky="w")
@@ -548,6 +564,13 @@ class SpanishToKatanaConverterApp:
             command=self.open_google_translate,
         )
         self.open_translate_button.grid(row=0, column=2, sticky="w")
+
+        self.auto_open_translate_check = ttk.Checkbutton(
+            button_frame,
+            text="auto",
+            variable=self.auto_open_translate_var,
+        )
+        self.auto_open_translate_check.grid(row=0, column=3, padx=(10, 0), sticky="w")
 
         english_label = ttk.Label(container, text="phonetic english output")
         english_label.grid(row=3, column=0, sticky="w", pady=(4, 8))
@@ -640,6 +663,13 @@ class SpanishToKatanaConverterApp:
         self.last_katakana_output = katakana.strip()
         self.set_text(self.katakana_text, katakana)
         self.update_google_translate_button_state()
+
+        if (
+            self.auto_open_translate_var.get()
+            and self.last_katakana_output
+            and not self.last_katakana_output.lower().startswith("error:")
+        ):
+            self.open_google_translate()
 
 
 
