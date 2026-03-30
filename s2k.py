@@ -49,9 +49,9 @@ GOOGLE_TRANSLATE_BASE_URL = "https://translate.google.com/?sl=ja&tl=es&text={tex
 
 def resource_path(relative_path):
     try:
-        base_path = sys._MEIPASS  # cuando es .exe
+        base_path = sys._MEIPASS  # .exe
     except Exception:
-        base_path = os.path.abspath(".")  # cuando es .py
+        base_path = os.path.abspath(".")  # .py
     return os.path.join(base_path, relative_path)
 
 def enable_dark_title_bar(window: tk.Tk) -> bool:
