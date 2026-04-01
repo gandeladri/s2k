@@ -40,6 +40,8 @@ def validate_project() -> int:
         "core/converter.py",
         "core/katakana_client.py",
         "assets/icons/s2k.ico",
+        "scripts/build.py",
+        "scripts/build_windows.py",
     ):
         if not _check_exists(rel):
             failures += 1
@@ -65,9 +67,9 @@ def validate_project() -> int:
         failures += 1
 
     try:
-        from frontend.windows.app import SpanishToKatanaConverterApp, main as windows_main
+        from frontend.windows.app import SpanishToKatanaConverterApp, run_app
 
-        windows_ok = callable(windows_main) and SpanishToKatanaConverterApp is not None
+        windows_ok = callable(run_app) and SpanishToKatanaConverterApp is not None
         _print_result("frontend.windows import", windows_ok)
         if not windows_ok:
             failures += 1

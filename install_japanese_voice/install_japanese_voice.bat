@@ -1,0 +1,3 @@
+@echo off
+echo Requesting administrator privileges...
+powershell -Command "Start-Process powershell -ArgumentList '-ExecutionPolicy Bypass -File \"%~dp0install_japanese_voice.ps1\"' -Verb RunAs"

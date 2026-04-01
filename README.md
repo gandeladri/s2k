@@ -1,6 +1,6 @@
 # Spanish to Katana Converter (S2K)
 
-A desktop application that converts Spanish text into phonetically accurate Katakana, with optional Google Translate integration.
+A windows application that converts Spanish text into phonetically accurate Katakana, with optional Google Translate integration.
 
 ---
 

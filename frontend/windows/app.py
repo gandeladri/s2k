@@ -1,6 +1,9 @@
+import base64
 import ctypes
 import os
+import subprocess
 import sys
+import threading
 import tkinter as tk
 import tkinter.font as tkfont
 import webbrowser
@@ -86,6 +89,10 @@ class SpanishToKatanaConverterApp:
         self.katakana_client = KatakanaClient()
         self.last_katakana_output = ""
         self.auto_open_translate_var = tk.BooleanVar(value=True)
+        self.auto_copy_var = tk.BooleanVar(value=True)
+        self.auto_play_var = tk.BooleanVar(value=True)
+        self.current_tts_process: subprocess.Popen[str] | None = None
+        self.tts_lock = threading.Lock()
 
         self.configure_styles()
         self.build_ui()
@@ -149,7 +156,7 @@ class SpanishToKatanaConverterApp:
             lightcolor=SCROLL_BG_COLOR,
         )
 
-    def on_enter_pressed(self, event):
+    def on_enter_pressed(self, event: tk.Event) -> str:
         self.on_convert()
         return "break"
 
@@ -170,11 +177,9 @@ class SpanishToKatanaConverterApp:
 
         button_frame = ttk.Frame(container, style="TFrame")
         button_frame.grid(row=2, column=0, sticky="ew", pady=16)
-        button_frame.columnconfigure(0, weight=0)
-        button_frame.columnconfigure(1, weight=0)
-        button_frame.columnconfigure(2, weight=0)
-        button_frame.columnconfigure(3, weight=0)
-        button_frame.columnconfigure(4, weight=1)
+        for index in range(6):
+            button_frame.columnconfigure(index, weight=0)
+        button_frame.columnconfigure(6, weight=1)
 
         self.convert_button = ttk.Button(button_frame, text="convert", command=self.on_convert)
         self.convert_button.grid(row=0, column=0, padx=(0, 10), sticky="w")
@@ -195,6 +200,20 @@ class SpanishToKatanaConverterApp:
             variable=self.auto_open_translate_var,
         )
         self.auto_open_translate_check.grid(row=0, column=3, padx=(10, 0), sticky="w")
+
+        self.auto_copy_check = ttk.Checkbutton(
+            button_frame,
+            text="copy",
+            variable=self.auto_copy_var,
+        )
+        self.auto_copy_check.grid(row=0, column=4, padx=(10, 0), sticky="w")
+
+        self.auto_play_check = ttk.Checkbutton(
+            button_frame,
+            text="play",
+            variable=self.auto_play_var,
+        )
+        self.auto_play_check.grid(row=0, column=5, padx=(10, 0), sticky="w")
 
         english_label = ttk.Label(container, text="phonetic english output")
         english_label.grid(row=3, column=0, sticky="w", pady=(4, 8))
@@ -250,6 +269,88 @@ class SpanishToKatanaConverterApp:
         widget.insert("1.0", value)
         widget.configure(state="disabled")
 
+    def copy_to_clipboard(self, value: str) -> None:
+        self.root.clipboard_clear()
+        self.root.clipboard_append(value)
+        self.root.update()
+
+    def stop_current_playback(self) -> None:
+        if sys.platform != "win32":
+            return
+
+        with self.tts_lock:
+            process = self.current_tts_process
+            self.current_tts_process = None
+
+        if process is None:
+            return
+
+        if process.poll() is None:
+            try:
+                process.terminate()
+                process.wait(timeout=1)
+            except Exception:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+
+    def play_katakana_async(self, value: str) -> None:
+        if sys.platform != "win32":
+            return
+
+        text = value.strip()
+        if not text:
+            return
+
+        self.stop_current_playback()
+        threading.Thread(target=self._play_katakana_worker, args=(text,), daemon=True).start()
+
+    def _play_katakana_worker(self, value: str) -> None:
+        encoded_text = base64.b64encode(value.encode("utf-8")).decode("ascii")
+        command = (
+            "Add-Type -AssemblyName System.Speech;"
+            f'$encoded = "{encoded_text}";'
+            '$text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($encoded));'
+            '$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer;'
+            '$voice = $synth.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo } | '
+            'Where-Object { $_.Culture.Name -like "ja*" } | Select-Object -First 1;'
+            'if ($null -eq $voice) { exit 0 };'
+            '$synth.SelectVoice($voice.Name);'
+            '$synth.Speak($text);'
+        )
+
+        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+
+        try:
+            process = subprocess.Popen(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    command,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                text=True,
+                creationflags=creation_flags,
+            )
+        except Exception:
+            return
+
+        with self.tts_lock:
+            self.current_tts_process = process
+
+        try:
+            process.wait()
+        finally:
+            with self.tts_lock:
+                if self.current_tts_process is process:
+                    self.current_tts_process = None
+
     def open_e2k_page(self) -> None:
         webbrowser.open_new_tab(E2K_WEB_URL)
 
@@ -288,15 +389,22 @@ class SpanishToKatanaConverterApp:
         self.set_text(self.katakana_text, katakana)
         self.update_google_translate_button_state()
 
-        if (
-            self.auto_open_translate_var.get()
-            and self.last_katakana_output
+        is_valid_result = (
+            bool(self.last_katakana_output)
             and not self.last_katakana_output.lower().startswith("error:")
-        ):
+        )
+
+        if is_valid_result and self.auto_copy_var.get():
+            self.copy_to_clipboard(self.last_katakana_output)
+
+        if is_valid_result and self.auto_open_translate_var.get():
             self.open_google_translate()
 
+        if is_valid_result and self.auto_play_var.get():
+            self.play_katakana_async(self.last_katakana_output)
 
-def main() -> None:
+
+def run_app() -> None:
     root = tk.Tk()
     try:
         root.call("tk", "scaling", 1.15)
@@ -306,8 +414,15 @@ def main() -> None:
     app = SpanishToKatanaConverterApp(root)
     enable_dark_title_bar(root)
     app.input_text.focus_set()
-    root.mainloop()
+
+    try:
+        root.mainloop()
+    finally:
+        app.stop_current_playback()
+
+
+main = run_app
 
 
 if __name__ == "__main__":
-    main()
+    run_app()
