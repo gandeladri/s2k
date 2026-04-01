@@ -16,7 +16,9 @@ $includePatterns = @(
     "*.md",
     "*.json",
     "*.yml",
-    "*.yaml"
+    "*.yaml",
+    "*.ps1",
+    "*.bat"
 )
 
 # Folders to exclude completely
@@ -46,7 +48,7 @@ function Test-IsExcludedFolder {
     )
 
     foreach ($folder in $excludeFolders) {
-        if ($FullPath -match [regex]::Escape("\$folder\")) {
+        if ($FullPath -match "(^|[\\/])" + [regex]::Escape($folder) + "([\\/]|$)") {
             return $true
         }
     }
@@ -69,8 +71,10 @@ function Test-IsExcludedFile {
 }
 
 # Cleanup previous outputs
-if (Test-Path $zipName) {
-    Remove-Item $zipName -Force
+$zipPath = Join-Path $projectRoot $zipName
+
+if (Test-Path $zipPath) {
+    Remove-Item $zipPath -Force
 }
 
 if (Test-Path $tempFolder) {
@@ -80,13 +84,18 @@ if (Test-Path $tempFolder) {
 New-Item -ItemType Directory -Path $tempFolder | Out-Null
 
 # Collect files using allowlist
-$files = Get-ChildItem -Path $projectRoot -Recurse -File -Include $includePatterns | Where-Object {
-    -not (Test-IsExcludedFolder $_.FullName) -and
-    -not (Test-IsExcludedFile $_)
+$files = Get-ChildItem -Path $projectRoot -Recurse -File | Where-Object {
+    $file = $_
+
+    (-not (Test-IsExcludedFolder $file.FullName)) -and
+    (-not (Test-IsExcludedFile $file)) -and
+    (
+        $includePatterns | Where-Object { $file.Name -like $_ }
+    )
 }
 
 foreach ($file in $files) {
-    $relativePath = $file.FullName.Substring($projectRoot.Length).TrimStart('\')
+    $relativePath = $file.FullName.Substring($projectRoot.Length).TrimStart('\', '/')
     $destinationPath = Join-Path $tempFolder $relativePath
     $destinationDir = Split-Path -Parent $destinationPath
 
@@ -97,7 +106,7 @@ foreach ($file in $files) {
     Copy-Item $file.FullName $destinationPath -Force
 }
 
-Compress-Archive -Path (Join-Path $tempFolder '*') -DestinationPath $zipName -Force
+Compress-Archive -Path (Join-Path $tempFolder '*') -DestinationPath $zipPath -Force
 
 # Remove temp folder after zip creation
 Remove-Item $tempFolder -Recurse -Force

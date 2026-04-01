@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -27,6 +29,66 @@ def _check_exists(relative_path: str) -> bool:
     return ok
 
 
+def _validate_settings_bootstrap() -> int:
+    failures = 0
+
+    try:
+        from frontend.windows.bootstrap import bootstrap_settings
+
+        with tempfile.TemporaryDirectory(prefix="s2k_settings_test_") as tmp_dir:
+            base_path = Path(tmp_dir)
+            manager, voices = bootstrap_settings(str(base_path))
+
+            settings_file = base_path / "settings.json"
+            created_ok = settings_file.exists()
+            _print_result("settings bootstrap creates file", created_ok, str(settings_file))
+            if not created_ok:
+                failures += 1
+                return failures
+
+            with settings_file.open("r", encoding="utf-8") as file:
+                data = json.load(file)
+
+            keys_ok = set(data.keys()) == {
+                "auto_open_google_translate",
+                "copy_to_clipboard",
+                "play_audio",
+                "selected_voice",
+            }
+            _print_result("settings bootstrap keys", keys_ok, str(sorted(data.keys())))
+            if not keys_ok:
+                failures += 1
+
+            selected_voice = data.get("selected_voice")
+            selected_voice_ok = (
+                selected_voice is None
+                or any(voice.id == selected_voice for voice in voices)
+            )
+            _print_result("settings selected_voice normalized", selected_voice_ok, repr(selected_voice))
+            if not selected_voice_ok:
+                failures += 1
+
+            manager.update_setting("play_audio", False)
+            persisted_ok = False
+            try:
+                with settings_file.open("r", encoding="utf-8") as file:
+                    reloaded = json.load(file)
+                persisted_ok = reloaded.get("play_audio") is False
+            except Exception as exc:
+                _print_result("settings reload after update", False, repr(exc))
+                failures += 1
+            else:
+                _print_result("settings persist immediate update", persisted_ok)
+                if not persisted_ok:
+                    failures += 1
+
+    except Exception as exc:
+        _print_result("settings bootstrap", False, repr(exc))
+        failures += 1
+
+    return failures
+
+
 def validate_project() -> int:
     _add_project_root_to_path()
 
@@ -37,6 +99,9 @@ def validate_project() -> int:
         "run_windows.py",
         "main.py",
         "frontend/windows/app.py",
+        "frontend/windows/bootstrap.py",
+        "frontend/windows/settings_manager.py",
+        "frontend/windows/tts_utils.py",
         "core/converter.py",
         "core/katakana_client.py",
         "assets/icons/s2k.ico",
@@ -77,8 +142,10 @@ def validate_project() -> int:
         _print_result("frontend.windows import", False, repr(exc))
         failures += 1
 
+    failures += _validate_settings_bootstrap()
+
     exe_path = project_root() / "dist" / "s2k.exe"
-    _print_result("windows exe present", exe_path.exists(), str(exe_path))
+    _print_result("windows exe present (optional build output)", exe_path.exists(), str(exe_path))
 
     if failures:
         print(f"Validation finished with {failures} blocking issue(s).")

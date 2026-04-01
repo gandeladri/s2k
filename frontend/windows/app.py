@@ -1,16 +1,15 @@
-import base64
 import ctypes
 import os
-import subprocess
 import sys
-import threading
 import tkinter as tk
 import tkinter.font as tkfont
 import webbrowser
-from tkinter import ttk
+from tkinter import messagebox, ttk
 from urllib.parse import quote
 
 from core import KatakanaClient, convert_text
+from frontend.windows.bootstrap import bootstrap_settings
+from frontend.windows.tts_utils import WinRTSpeechPlayer
 
 APP_TITLE = "Spanish to Katana Converter"
 E2K_WEB_URL = "https://www.sljfaq.org/cgi/e2k.cgi"
@@ -25,6 +24,18 @@ BORDER_COLOR = "#3c3c3c"
 INSERT_COLOR = "#ffffff"
 SCROLL_TROUGH_COLOR = "#2a2a2a"
 SCROLL_BG_COLOR = "#4a4a4a"
+VOICE_DROPDOWN_WIDTH = 18
+EMPTY_VOICE_PLACEHOLDER = "Empty"
+
+
+WARNING_ICON_TEXT = "⚠"
+WARNING_TOOLTIP_TEXT = "Japanese TTS not detected. Audio may not play."
+
+
+def get_runtime_base_path() -> str:
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(sys.argv[0]))
 
 
 def resource_path(relative_path: str) -> str:
@@ -88,15 +99,24 @@ class SpanishToKatanaConverterApp:
 
         self.katakana_client = KatakanaClient()
         self.last_katakana_output = ""
-        self.auto_open_translate_var = tk.BooleanVar(value=True)
-        self.auto_copy_var = tk.BooleanVar(value=True)
-        self.auto_play_var = tk.BooleanVar(value=True)
-        self.current_tts_process: subprocess.Popen[str] | None = None
-        self.tts_lock = threading.Lock()
+        self.runtime_base_path = get_runtime_base_path()
+        self.settings_manager, self.japanese_voices = bootstrap_settings(self.runtime_base_path)
+        self.tts_warning_shown = False
+        self.tts_player = WinRTSpeechPlayer()
+
+        self.auto_open_translate_var = tk.BooleanVar(value=self.settings_manager.settings["auto_open_google_translate"])
+        self.auto_copy_var = tk.BooleanVar(value=self.settings_manager.settings["copy_to_clipboard"])
+        self.auto_play_var = tk.BooleanVar(value=self.settings_manager.settings["play_audio"])
+        self.voice_display_to_id: dict[str, str] = {}
+        self.voice_dropdown_var = tk.StringVar()
 
         self.configure_styles()
         self.build_ui()
+        self.refresh_japanese_voices()
+        self.bind_ui_events()
+        self.persist_current_ui_settings()
         self.update_google_translate_button_state()
+        self.maybe_warn_missing_japanese_tts_on_startup()
 
     def configure_styles(self) -> None:
         self.base_font = tkfont.nametofont("TkDefaultFont").copy()
@@ -155,6 +175,194 @@ class SpanishToKatanaConverterApp:
             darkcolor=SCROLL_BG_COLOR,
             lightcolor=SCROLL_BG_COLOR,
         )
+        style.configure(
+            "TCombobox",
+            fieldbackground=SURFACE_COLOR,
+            background=SURFACE_COLOR,
+            foreground=TEXT_COLOR,
+            arrowcolor=TEXT_COLOR,
+            bordercolor=BORDER_COLOR,
+            lightcolor=SURFACE_COLOR,
+            darkcolor=SURFACE_COLOR,
+            padding=(8, 4),
+        )
+        style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", SURFACE_COLOR)],
+            foreground=[("readonly", TEXT_COLOR)],
+            selectforeground=[("readonly", TEXT_COLOR)],
+            selectbackground=[("readonly", SURFACE_COLOR)],
+        )
+
+    def bind_ui_events(self) -> None:
+        self.voice_dropdown.bind("<<ComboboxSelected>>", self.on_selected_voice_changed, add="+")
+
+    def persist_setting(self, key: str, value: object) -> None:
+        self.settings_manager.update_setting(key, value)
+
+    def persist_current_ui_settings(self) -> None:
+        self.persist_setting("auto_open_google_translate", self.is_auto_open_translate_enabled())
+        self.persist_setting("copy_to_clipboard", self.is_auto_copy_enabled())
+        self.persist_setting("play_audio", self.is_auto_play_enabled())
+        self.persist_setting("selected_voice", self.get_selected_voice_id())
+
+    def is_auto_open_translate_enabled(self) -> bool:
+        return self.auto_open_translate_var.get()
+
+    def is_auto_copy_enabled(self) -> bool:
+        return self.auto_copy_var.get()
+
+    def is_auto_play_enabled(self) -> bool:
+        return self.auto_play_var.get()
+
+    def on_auto_open_translate_changed(self) -> None:
+        self.persist_setting("auto_open_google_translate", self.is_auto_open_translate_enabled())
+
+    def on_auto_copy_changed(self) -> None:
+        self.persist_setting("copy_to_clipboard", self.is_auto_copy_enabled())
+
+    def on_auto_play_changed(self) -> None:
+        is_enabled = self.is_auto_play_enabled()
+        self.persist_setting("play_audio", is_enabled)
+        if is_enabled:
+            self.refresh_japanese_voices()
+            self.maybe_warn_missing_japanese_tts()
+
+    def on_selected_voice_changed(self, *_args: object) -> None:
+        selected_display_name = self.voice_dropdown_var.get().strip()
+        selected_voice_id = self.voice_display_to_id.get(selected_display_name)
+        self.persist_setting("selected_voice", selected_voice_id)
+
+    def has_japanese_voices(self) -> bool:
+        return bool(self.japanese_voices)
+
+    def get_voice_display_values(self) -> list[str]:
+        if not self.japanese_voices:
+            return [EMPTY_VOICE_PLACEHOLDER]
+        return [voice.name for voice in self.japanese_voices]
+
+    def get_selected_voice_display_name(self) -> str:
+        selected_voice_id = self.get_selected_voice_id()
+        if selected_voice_id is None:
+            return EMPTY_VOICE_PLACEHOLDER
+
+        for voice in self.japanese_voices:
+            if voice.id == selected_voice_id:
+                return voice.name
+
+        return EMPTY_VOICE_PLACEHOLDER
+
+    def maybe_warn_missing_japanese_tts_on_startup(self) -> None:
+        self.refresh_japanese_voices()
+        if self.is_auto_play_enabled():
+            self.maybe_warn_missing_japanese_tts()
+
+    def maybe_warn_missing_japanese_tts(self) -> None:
+        if self.has_japanese_voices() or self.tts_warning_shown:
+            return
+
+        self.tts_warning_shown = True
+        messagebox.showwarning(
+            title="Japanese TTS not detected",
+            message=(
+                "No Japanese text-to-speech voice was detected on this system. "
+                "Playback will remain available, but audio may not be heard until a Japanese Windows voice is installed."
+            ),
+        )
+
+    def get_selected_voice_id(self) -> str | None:
+        selected_voice_id = self.settings_manager.settings.get("selected_voice")
+        for voice in self.japanese_voices:
+            if voice.id == selected_voice_id:
+                return voice.id
+
+        fallback_voice_id = self.japanese_voices[0].id if self.japanese_voices else None
+        if selected_voice_id != fallback_voice_id:
+            self.persist_setting("selected_voice", fallback_voice_id)
+        return fallback_voice_id
+
+    def refresh_japanese_voices(self) -> None:
+        previous_display_name = self.voice_dropdown_var.get().strip()
+        previous_voice_id = self.voice_display_to_id.get(previous_display_name)
+
+        self.japanese_voices = bootstrap_settings(self.runtime_base_path)[1]
+        self.voice_display_to_id = {voice.name: voice.id for voice in self.japanese_voices}
+
+        selected_voice_id = self.settings_manager.settings.get("selected_voice")
+        available_voice_ids = {voice.id for voice in self.japanese_voices}
+
+        if selected_voice_id not in available_voice_ids:
+            selected_voice_id = self.japanese_voices[0].id if self.japanese_voices else None
+            if self.settings_manager.settings.get("selected_voice") != selected_voice_id:
+                self.persist_setting("selected_voice", selected_voice_id)
+
+        display_values = self.get_voice_display_values()
+        self.voice_dropdown.configure(values=display_values)
+
+        selected_display_name = EMPTY_VOICE_PLACEHOLDER
+        if selected_voice_id is not None:
+            for voice in self.japanese_voices:
+                if voice.id == selected_voice_id:
+                    selected_display_name = voice.name
+                    break
+        elif previous_voice_id in available_voice_ids:
+            for voice in self.japanese_voices:
+                if voice.id == previous_voice_id:
+                    selected_display_name = voice.name
+                    break
+
+        self.voice_dropdown_var.set(selected_display_name)
+        self.on_selected_voice_changed()
+        self.update_missing_tts_ui()
+
+
+    def create_tooltip(self, widget: tk.Widget, text: str) -> None:
+        tooltip_window: tk.Toplevel | None = None
+
+        def show_tooltip(_event: tk.Event) -> None:
+            nonlocal tooltip_window
+            if tooltip_window is not None:
+                return
+
+            x = widget.winfo_rootx() + 12
+            y = widget.winfo_rooty() + widget.winfo_height() + 8
+
+            tooltip_window = tk.Toplevel(self.root)
+            tooltip_window.wm_overrideredirect(True)
+            tooltip_window.wm_geometry(f"+{x}+{y}")
+            tooltip_window.configure(bg="#d2a106")
+
+            label = tk.Label(
+                tooltip_window,
+                text=text,
+                bg="#d2a106",
+                fg="#111111",
+                padx=8,
+                pady=4,
+                font=self.button_font,
+                relief="solid",
+                borderwidth=1,
+            )
+            label.pack()
+
+        def hide_tooltip(_event: tk.Event) -> None:
+            nonlocal tooltip_window
+            if tooltip_window is None:
+                return
+            tooltip_window.destroy()
+            tooltip_window = None
+
+        widget.bind("<Enter>", show_tooltip, add="+")
+        widget.bind("<Leave>", hide_tooltip, add="+")
+        widget.bind("<ButtonPress>", hide_tooltip, add="+")
+
+    def update_missing_tts_ui(self) -> None:
+        if self.has_japanese_voices():
+            self.missing_tts_warning_label.grid_remove()
+            return
+
+        self.missing_tts_warning_label.grid()
+
 
     def on_enter_pressed(self, event: tk.Event) -> str:
         self.on_convert()
@@ -177,9 +385,9 @@ class SpanishToKatanaConverterApp:
 
         button_frame = ttk.Frame(container, style="TFrame")
         button_frame.grid(row=2, column=0, sticky="ew", pady=16)
-        for index in range(6):
+        for index in range(8):
             button_frame.columnconfigure(index, weight=0)
-        button_frame.columnconfigure(6, weight=1)
+        button_frame.columnconfigure(8, weight=1)
 
         self.convert_button = ttk.Button(button_frame, text="convert", command=self.on_convert)
         self.convert_button.grid(row=0, column=0, padx=(0, 10), sticky="w")
@@ -198,6 +406,7 @@ class SpanishToKatanaConverterApp:
             button_frame,
             text="auto",
             variable=self.auto_open_translate_var,
+            command=self.on_auto_open_translate_changed,
         )
         self.auto_open_translate_check.grid(row=0, column=3, padx=(10, 0), sticky="w")
 
@@ -205,6 +414,7 @@ class SpanishToKatanaConverterApp:
             button_frame,
             text="copy",
             variable=self.auto_copy_var,
+            command=self.on_auto_copy_changed,
         )
         self.auto_copy_check.grid(row=0, column=4, padx=(10, 0), sticky="w")
 
@@ -212,8 +422,30 @@ class SpanishToKatanaConverterApp:
             button_frame,
             text="play",
             variable=self.auto_play_var,
+            command=self.on_auto_play_changed,
         )
         self.auto_play_check.grid(row=0, column=5, padx=(10, 0), sticky="w")
+
+        self.voice_dropdown = ttk.Combobox(
+            button_frame,
+            textvariable=self.voice_dropdown_var,
+            values=self.get_voice_display_values(),
+            state="readonly",
+            width=VOICE_DROPDOWN_WIDTH,
+        )
+        self.voice_dropdown.grid(row=0, column=6, padx=(10, 0), sticky="w")
+
+        self.missing_tts_warning_label = tk.Label(
+            button_frame,
+            text=WARNING_ICON_TEXT,
+            bg=BG_COLOR,
+            fg="#f0c94d",
+            font=tkfont.Font(family=self.base_font.cget("family"), size=13, weight="bold"),
+            cursor="hand2",
+        )
+        self.missing_tts_warning_label.grid(row=0, column=7, padx=(8, 0), sticky="w")
+        self.create_tooltip(self.missing_tts_warning_label, WARNING_TOOLTIP_TEXT)
+        self.update_missing_tts_ui()
 
         english_label = ttk.Label(container, text="phonetic english output")
         english_label.grid(row=3, column=0, sticky="w", pady=(4, 8))
@@ -270,89 +502,36 @@ class SpanishToKatanaConverterApp:
         widget.configure(state="disabled")
 
     def copy_to_clipboard(self, value: str) -> None:
-        self.root.clipboard_clear()
-        self.root.clipboard_append(value)
-        self.root.update()
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(value)
+            self.root.update()
+        except Exception:
+            pass
+
 
     def stop_current_playback(self) -> None:
-        if sys.platform != "win32":
-            return
-
-        with self.tts_lock:
-            process = self.current_tts_process
-            self.current_tts_process = None
-
-        if process is None:
-            return
-
-        if process.poll() is None:
-            try:
-                process.terminate()
-                process.wait(timeout=1)
-            except Exception:
-                try:
-                    process.kill()
-                except Exception:
-                    pass
+        try:
+            self.tts_player.stop()
+        except Exception:
+            pass
 
     def play_katakana_async(self, value: str) -> None:
-        if sys.platform != "win32":
-            return
-
         text = value.strip()
         if not text:
             return
 
-        self.stop_current_playback()
-        threading.Thread(target=self._play_katakana_worker, args=(text,), daemon=True).start()
-
-    def _play_katakana_worker(self, value: str) -> None:
-        encoded_text = base64.b64encode(value.encode("utf-8")).decode("ascii")
-        command = (
-            "Add-Type -AssemblyName System.Speech;"
-            f'$encoded = "{encoded_text}";'
-            '$text = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($encoded));'
-            '$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer;'
-            '$voice = $synth.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo } | '
-            'Where-Object { $_.Culture.Name -like "ja*" } | Select-Object -First 1;'
-            'if ($null -eq $voice) { exit 0 };'
-            '$synth.SelectVoice($voice.Name);'
-            '$synth.Speak($text);'
-        )
-
-        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-
+        self.refresh_japanese_voices()
         try:
-            process = subprocess.Popen(
-                [
-                    "powershell",
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-Command",
-                    command,
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                stdin=subprocess.DEVNULL,
-                text=True,
-                creationflags=creation_flags,
-            )
+            self.tts_player.speak_async(text, self.get_selected_voice_id())
         except Exception:
-            return
-
-        with self.tts_lock:
-            self.current_tts_process = process
-
-        try:
-            process.wait()
-        finally:
-            with self.tts_lock:
-                if self.current_tts_process is process:
-                    self.current_tts_process = None
+            pass
 
     def open_e2k_page(self) -> None:
-        webbrowser.open_new_tab(E2K_WEB_URL)
+            try:
+                webbrowser.open_new_tab(E2K_WEB_URL)
+            except Exception:
+                pass
 
     def build_google_translate_url(self) -> str:
         encoded_text = quote(self.last_katakana_output, safe="")
@@ -361,7 +540,10 @@ class SpanishToKatanaConverterApp:
     def open_google_translate(self) -> None:
         if not self.last_katakana_output.strip():
             return
-        webbrowser.open_new_tab(self.build_google_translate_url())
+        try:
+            webbrowser.open_new_tab(self.build_google_translate_url())
+        except Exception:
+            pass
 
     def update_google_translate_button_state(self) -> None:
         if self.last_katakana_output.strip():
@@ -394,13 +576,13 @@ class SpanishToKatanaConverterApp:
             and not self.last_katakana_output.lower().startswith("error:")
         )
 
-        if is_valid_result and self.auto_copy_var.get():
+        if is_valid_result and self.is_auto_copy_enabled():
             self.copy_to_clipboard(self.last_katakana_output)
 
-        if is_valid_result and self.auto_open_translate_var.get():
+        if is_valid_result and self.is_auto_open_translate_enabled():
             self.open_google_translate()
 
-        if is_valid_result and self.auto_play_var.get():
+        if is_valid_result and self.is_auto_play_enabled():
             self.play_katakana_async(self.last_katakana_output)
 
 
